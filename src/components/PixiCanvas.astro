@@ -1,0 +1,253 @@
+---
+// PixiCanvas.astro - Main PixiJS rendering component
+---
+
+<canvas id="pixi-canvas"></canvas>
+
+<script>
+  import { Application, Assets, Sprite, Texture, Rectangle } from 'pixi.js';
+  import { SPRITES } from '../components/sprites.ts';
+
+  let app: Application | null = null;
+
+  async function initPixiApp() {
+    const canvas = document.getElementById('pixi-canvas') as HTMLCanvasElement;
+    if (!canvas) {
+      console.error('Canvas element not found');
+      return;
+    }
+
+    try {
+      // Create Pixi Application
+      app = new Application();
+      
+      await app.init({
+        canvas: canvas,
+        width: window.innerWidth,
+        height: window.innerHeight,
+        backgroundColor: 0x1a1a2e,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+        antialias: true,
+      });
+
+      console.log('PixiJS initialized successfully');
+
+      // Load sprite sheet
+      const spriteSheetPath = '/assets/OPSpriteSheet.png';
+      console.log('Loading sprite sheet from:', spriteSheetPath);
+      
+      const baseTexture = await Assets.load(spriteSheetPath);
+      console.log('Sprite sheet loaded successfully');
+
+      // Helper function to get responsive scale
+      function getResponsiveScale(baseWidth: number, baseHeight: number): number {
+        const screenWidth = app!.screen.width;
+        const screenHeight = app!.screen.height;
+        
+        // Determine device type
+        const isMobile = screenWidth < 768;
+        const isTablet = screenWidth >= 768 && screenWidth < 1024;
+        const isDesktop = screenWidth >= 1024;
+        
+        // Calculate scale based on screen size
+        let baseScale = 1.0;
+        
+        if (isMobile) {
+          // Mobile: scale down significantly
+          baseScale = Math.min(screenWidth / baseWidth, screenHeight / baseHeight) * 0.3;
+        } else if (isTablet) {
+          // Tablet: moderate scaling
+          baseScale = Math.min(screenWidth / baseWidth, screenHeight / baseHeight) * 0.5;
+        } else {
+          // Desktop: larger sprites
+          baseScale = Math.min(screenWidth / baseWidth, screenHeight / baseHeight) * 0.7;
+        }
+        
+        // Add random variation (±30%)
+        const variation = 0.7 + Math.random() * 0.6;
+        return baseScale * variation;
+      }
+
+      // Create sprites from each region
+      SPRITES.forEach((spriteData, index) => {
+        try {
+          // Create texture region
+          const frame = new Rectangle(
+            spriteData.x,
+            spriteData.y,
+            spriteData.width,
+            spriteData.height
+          );
+
+          const texture = new Texture({
+            source: baseTexture.source,
+            frame: frame
+          });
+
+          const sprite = new Sprite(texture);
+
+          // Set anchor to center for better rotation and positioning
+          sprite.anchor.set(0.5);
+
+          // Get responsive scale
+          const scale = getResponsiveScale(spriteData.width, spriteData.height);
+          sprite.scale.set(scale);
+
+          // Calculate scaled dimensions
+          const scaledWidth = spriteData.width * scale;
+          const scaledHeight = spriteData.height * scale;
+
+          // Responsive positioning with padding
+          const padding = 50;
+          const maxX = Math.max(padding, app!.screen.width - padding);
+          const maxY = Math.max(padding, app!.screen.height - padding);
+          
+          sprite.position.x = padding + Math.random() * (maxX - padding);
+          sprite.position.y = padding + Math.random() * (maxY - padding);
+
+          // Random rotation
+          sprite.rotation = Math.random() * Math.PI * 2;
+
+          // Random alpha (0.6 to 1.0)
+          sprite.alpha = 0.6 + Math.random() * 0.4;
+
+          // Add to stage
+          app!.stage.addChild(sprite);
+          
+          // Store sprite name for resize calculations
+          (sprite as any).spriteName = spriteData.name;
+
+          console.log(`Added sprite: ${spriteData.name} at scale ${scale.toFixed(2)}`);
+        } catch (err) {
+          console.error(`Error creating sprite ${spriteData.name}:`, err);
+        }
+      });
+
+      // Animation loop - gentle floating effect
+      let elapsed = 0;
+      app.ticker.add((ticker) => {
+        elapsed += ticker.deltaTime;
+
+        app!.stage.children.forEach((child, index) => {
+          if (child instanceof Sprite) {
+            // Floating animation
+            const speed = 0.01 + (index * 0.001);
+            const amplitude = 0.5;
+            child.position.y += Math.sin(elapsed * speed) * amplitude;
+            
+            // Slight rotation
+            child.rotation += 0.001;
+          }
+        });
+      });
+
+      console.log(`Successfully created ${SPRITES.length} sprites`);
+
+    } catch (error) {
+      console.error('Error initializing PixiJS:', error);
+      
+      // Show error message on canvas
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#1a1a2e';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '20px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('Failed to load sprites', canvas.width / 2, canvas.height / 2);
+          ctx.font = '14px Arial';
+          ctx.fillText('Please check console for errors', canvas.width / 2, canvas.height / 2 + 30);
+        }
+      }
+    }
+  }
+
+  // Handle window resize with debouncing
+  let resizeTimeout: NodeJS.Timeout;
+  function handleResize() {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      if (app) {
+        const oldWidth = app.screen.width;
+        const oldHeight = app.screen.height;
+        
+        // Resize renderer
+        app.renderer.resize(window.innerWidth, window.innerHeight);
+        
+        const newWidth = app.screen.width;
+        const newHeight = app.screen.height;
+        
+        console.log(`Screen resized from ${oldWidth}x${oldHeight} to ${newWidth}x${newHeight}`);
+        
+        // Reposition and rescale sprites
+        app.stage.children.forEach((child) => {
+          if (child instanceof Sprite) {
+            // Get sprite data to recalculate scale
+            const spriteData = SPRITES.find(s => s.name === (child as any).spriteName);
+            if (spriteData) {
+              // Recalculate responsive scale
+              const screenWidth = newWidth;
+              const isMobile = screenWidth < 768;
+              const isTablet = screenWidth >= 768 && screenWidth < 1024;
+              
+              let baseScale = 1.0;
+              if (isMobile) {
+                baseScale = Math.min(newWidth / spriteData.width, newHeight / spriteData.height) * 0.3;
+              } else if (isTablet) {
+                baseScale = Math.min(newWidth / spriteData.width, newHeight / spriteData.height) * 0.5;
+              } else {
+                baseScale = Math.min(newWidth / spriteData.width, newHeight / spriteData.height) * 0.7;
+              }
+              
+              const variation = 0.7 + Math.random() * 0.6;
+              child.scale.set(baseScale * variation);
+            }
+            
+            // Reposition proportionally
+            const xRatio = child.position.x / oldWidth;
+            const yRatio = child.position.y / oldHeight;
+            
+            const padding = 50;
+            const maxX = Math.max(padding, newWidth - padding);
+            const maxY = Math.max(padding, newHeight - padding);
+            
+            child.position.x = Math.min(xRatio * newWidth, maxX);
+            child.position.y = Math.min(yRatio * newHeight, maxY);
+          }
+        });
+      }
+    }, 250); // Debounce resize events
+  }
+
+  // Initialize when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPixiApp);
+  } else {
+    initPixiApp();
+  }
+
+  // Add resize listener
+  window.addEventListener('resize', handleResize);
+
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    if (app) {
+      app.destroy(true);
+    }
+  });
+</script>
+
+<style>
+  #pixi-canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    margin: 0;
+    padding: 0;
+  }
+</style>
